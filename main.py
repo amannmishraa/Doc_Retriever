@@ -6,8 +6,8 @@ from typing import List
 import time
 import logging
 import threading
-from search import search_documents
-from scraper import scrape_news
+from Search import search_documents
+from Scraper import scrape_news
 from cache import cache_results, get_cached_results
 
 app = FastAPI()
