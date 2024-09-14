@@ -1,22 +1,33 @@
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import numpy as np
+from typing import List
 
+DATABASE_URL = "sqlite:///./test.db"  
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class DocumentMetadata(Base):
-    __tablename__ = 'documents'
+    __tablename__ = "document_metadata"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
+    title = Column(String, index=True)
     description = Column(String)
-    vector_id = Column(Integer)
+    vector_id = Column(Integer, index=True) 
 
-def get_engine():
-    return create_engine('sqlite:///documents.db', connect_args={"check_same_thread": False})
+class UserRequest(Base):
+    __tablename__ = "user_request"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    request_count = Column(Integer, default=0)
 
 def init_db():
-    engine = get_engine()
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(bind=engine)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+def encode_text(text: str) -> List[float]:
+    
+    return np.random.rand(128).tolist()  
