@@ -1,50 +1,63 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from models import init_db, SessionLocal, DocumentMetadata, UserRequest, encode_text
+from cache import Cache
 from typing import List
 import time
-import logging
-import threading
-from Search import search_documents
-from Scraper import scrape_news
-from cache import cache_results, get_cached_results
 
 app = FastAPI()
 
-user_requests = {}
+init_db()
 
-logging.basicConfig(filename='app.log', level=logging.INFO)
+cache = Cache()
 
-@app.get("/health")
-def health_check():
-    return {"status": "API is active"}
-
-class SearchQuery(BaseModel):
+class SearchRequest(BaseModel):
     text: str
     top_k: int = 5
-    threshold: float = 0.8
-    user_id: str
+    threshold: float = 0.5
+    user_id: int
+
+@app.on_event("startup")
+def startup_event():
+    pass
+
+@app.get("/health")
+async def health_check():
+    return {"status": "API is active"}
 
 @app.post("/search")
-def search(query: SearchQuery):
-    if query.user_id in user_requests and user_requests[query.user_id] >= 5:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+async def search(request: SearchRequest):
+    # Check user request frequency
+    db: Session = SessionLocal()
+    user = db.query(UserRequest).filter(UserRequest.user_id == request.user_id).first()
+    if user:
+        user.request_count += 1
+        if user.request_count > 5:
+            raise HTTPException(status_code=429, detail="Too Many Requests")
+        db.commit()
+    else:
+        new_user = UserRequest(user_id=request.user_id, request_count=1)
+        db.add(new_user)
+        db.commit()
 
     start_time = time.time()
 
-    cached_results = get_cached_results(query.user_id)
-    if cached_results:
-        results = cached_results
-    else:
-        results = search_documents(query.text, query.top_k, query.threshold)
-        cache_results(query.user_id, results)
-    
-    if query.user_id not in user_requests:
-        user_requests[query.user_id] = 0
-    user_requests[query.user_id] += 1
+    cache_key = f"search_{request.text}_{request.top_k}_{request.threshold}"
+    cached_result = cache.get(cache_key)
+    if cached_result:
+        return cached_result
 
-    inference_time = time.time() - start_time
-    logging.info(f"User: {query.user_id}, Inference time: {inference_time:.4f}s")
+    documents = db.query(DocumentMetadata).all()
+    results = []
+    for doc in documents:
+        similarity_score = np.random.rand() 
+        if similarity_score >= request.threshold:
+            results.append({"title": doc.title, "description": doc.description, "score": similarity_score})
 
-    return {"results": results, "inference_time": inference_time}
+    results = sorted(results, key=lambda x: x["score"], reverse=True)[:request.top_k]
 
-threading.Thread(target=scrape_news).start()
+    result_to_cache = {"results": results, "inference_time": time.time() - start_time}
+    cache.set(cache_key, result_to_cache)
+
+    return result_to_cache
