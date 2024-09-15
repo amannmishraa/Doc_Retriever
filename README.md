@@ -24,7 +24,7 @@ This project implements a document retrieval system designed for chat applicatio
 - Elastic Search should be downloaded for Docker to fetch its elasticsearch.yml file otherwise it will give configuration error.
 - after cloning repository open it and save all the files and run run the docker command given below also check the dockerfile and docker-compose.yml for any missing dependencies.
 - Docker will install all dependencies and will build a container and will start running.
-- At last to verify try running test files as the command given below and will start generating output.
+- At last to verify try running test files as the command given below and it will start generating output.
 
 ### Clone the Repository
 
