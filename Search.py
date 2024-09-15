@@ -1,10 +1,12 @@
-from elasticsearch import Elasticsearch
-es = Elasticsearch("http://localhost:9200")
+from elasticsearch import AsyncElasticsearch
 
-def index_document(doc_id, text, embedding):
-    es.index(index="documents", id=doc_id, body={"text": text, "embedding": embedding})
+es = es = AsyncElasticsearch("http://elasticsearch:9200")
 
-def search_documents(query_text, top_k=5, threshold=0.8):
+
+async def index_document(doc_id, text, embedding):
+    await es.index(index="documents", id=doc_id, body={"text": text, "embedding": embedding})
+
+async def search_documents(query_text, top_k=5, threshold=0.8):
     query_embedding = encode_text(query_text)
 
     body = {
@@ -20,8 +22,8 @@ def search_documents(query_text, top_k=5, threshold=0.8):
         }
     }
 
-    results = es.search(index="documents", body=body)
+    results = await es.search(index="documents", body=body)
     return results['hits']['hits']
 
 def encode_text(text):
-    return [0.1, 0.2, 0.3] 
+    return [0.1, 0.2, 0.3]

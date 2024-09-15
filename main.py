@@ -1,63 +1,61 @@
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from models import init_db, SessionLocal, DocumentMetadata, UserRequest, encode_text
-from cache import Cache
-from typing import List
+from fastapi import FastAPI, HTTPException
+from models import SearchRequest, Document
+from database import initialize_index, index_document, delete_document, search_document
+from cache import increment_user_requests, get_user_requests
+from Scraper import scrape_news
 import time
+import asyncio
 
-app = FastAPI()
-
-init_db()
-
-cache = Cache()
-
-class SearchRequest(BaseModel):
-    text: str
-    top_k: int = 5
-    threshold: float = 0.5
-    user_id: int
+app = FastAPI(title="Document Retrieval System", version="1.0.0")
 
 @app.on_event("startup")
-def startup_event():
-    pass
+async def startup_event():
+    await initialize_index()
+    asyncio.create_task(scrape_news()) 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "API is active"}
+    return {"status": "OK"}
 
 @app.post("/search")
 async def search(request: SearchRequest):
-    # Check user request frequency
-    db: Session = SessionLocal()
-    user = db.query(UserRequest).filter(UserRequest.user_id == request.user_id).first()
-    if user:
-        user.request_count += 1
-        if user.request_count > 5:
-            raise HTTPException(status_code=429, detail="Too Many Requests")
-        db.commit()
-    else:
-        new_user = UserRequest(user_id=request.user_id, request_count=1)
-        db.add(new_user)
-        db.commit()
-
     start_time = time.time()
 
-    cache_key = f"search_{request.text}_{request.top_k}_{request.threshold}"
-    cached_result = cache.get(cache_key)
-    if cached_result:
-        return cached_result
+    user_requests = await get_user_requests(request.user_id)
+    if user_requests >= 5:
+        raise HTTPException(status_code=429, detail="Too many requests")
 
-    documents = db.query(DocumentMetadata).all()
-    results = []
-    for doc in documents:
-        similarity_score = np.random.rand() 
-        if similarity_score >= request.threshold:
-            results.append({"title": doc.title, "description": doc.description, "score": similarity_score})
+    await increment_user_requests(request.user_id)
 
-    results = sorted(results, key=lambda x: x["score"], reverse=True)[:request.top_k]
+    try:
+        results = await search_document(request.dict()) 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
-    result_to_cache = {"results": results, "inference_time": time.time() - start_time}
-    cache.set(cache_key, result_to_cache)
+    end_time = time.time()
+    inference_time = end_time - start_time
 
-    return result_to_cache
+    return {"results": results, "inference_time": inference_time}
+
+@app.post("/ingest")
+async def ingest_document(document: Document):
+    try:
+        doc_id = await index_document(document.dict())
+        return {"message": "Document ingested successfully", "id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ingesting document: {str(e)}")
+
+@app.delete("/delete/{doc_id}")
+async def delete_document_endpoint(doc_id: str):
+    try:
+        deleted = await delete_document(doc_id)
+        if deleted:
+            return {"message": "Document deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Document not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
