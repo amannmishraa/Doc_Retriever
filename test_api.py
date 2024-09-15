@@ -1,4 +1,3 @@
-# test_api_endpoints.py
 import requests
 
 BASE_URL = "http://localhost:8000"

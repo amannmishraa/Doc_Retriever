@@ -1,4 +1,3 @@
-# test_rate_limiting.py
 import requests
 import time
 
