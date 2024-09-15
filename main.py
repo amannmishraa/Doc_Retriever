@@ -1,61 +1,57 @@
-from fastapi import FastAPI, HTTPException
-from models import SearchRequest, Document
-from database import initialize_index, index_document, delete_document, search_document
-from cache import increment_user_requests, get_user_requests
-from Scraper import scrape_news
-import time
+from fastapi import FastAPI, Request, HTTPException
+from pydantic import BaseModel
+import logging
 import asyncio
+from Scraper import scrape_news  
 
-app = FastAPI(title="Document Retrieval System", version="1.0.0")
+app = FastAPI()
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(level=logging.INFO)
+
+user_request_count = {}
+USER_REQUEST_LIMIT = 5
+
+async def scrape_news_task():
+    while True:
+        try:
+            await scrape_news()
+        except Exception as e:
+            logger.error(f"Failed to scrape news: {e}")
+        await asyncio.sleep(3600) 
 
 @app.on_event("startup")
 async def startup_event():
-    await initialize_index()
-    asyncio.create_task(scrape_news()) 
+    logger.info("Starting background news scraping task...")
+    asyncio.create_task(scrape_news_task()) 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "OK"}
+    return {"status": "ok"}
+
+class SearchRequest(BaseModel):
+    text: str
+    top_k: int = 10
+    threshold: float = 0.7
+    user_id: str
 
 @app.post("/search")
 async def search(request: SearchRequest):
-    start_time = time.time()
+    user_id = request.user_id
+    if user_id not in user_request_count:
+        user_request_count[user_id] = 1
+    else:
+        user_request_count[user_id] += 1
+    
+    if user_request_count[user_id] > USER_REQUEST_LIMIT:
+        raise HTTPException(status_code=429, detail="Too Many Requests")
 
-    user_requests = await get_user_requests(request.user_id)
-    if user_requests >= 5:
-        raise HTTPException(status_code=429, detail="Too many requests")
+    logger.info(f"Search request by user {user_id}: text={request.text}, top_k={request.top_k}, threshold={request.threshold}")
+    results = {
+        "results": [
+            {"id": 1, "title": "Sample Result 1"},
+            {"id": 2, "title": "Sample Result 2"}
+        ]
+    }
+    return results
 
-    await increment_user_requests(request.user_id)
-
-    try:
-        results = await search_document(request.dict()) 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
-
-    end_time = time.time()
-    inference_time = end_time - start_time
-
-    return {"results": results, "inference_time": inference_time}
-
-@app.post("/ingest")
-async def ingest_document(document: Document):
-    try:
-        doc_id = await index_document(document.dict())
-        return {"message": "Document ingested successfully", "id": doc_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ingesting document: {str(e)}")
-
-@app.delete("/delete/{doc_id}")
-async def delete_document_endpoint(doc_id: str):
-    try:
-        deleted = await delete_document(doc_id)
-        if deleted:
-            return {"message": "Document deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Document not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
